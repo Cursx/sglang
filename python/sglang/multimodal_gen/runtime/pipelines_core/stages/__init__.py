@@ -58,6 +58,10 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.latent_preparation_av i
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_denoising import (
     LTX2DenoisingStage,
+from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_two_stage import (
+    LTX2LatentUpsampleStage,
+    LTX2RefinementLatentPreparationStage,
+    LTX2TwoStagePreparationStage,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.text_connector import (
     LTX2TextConnectorStage,
@@ -81,6 +85,9 @@ __all__ = [
     "LatentPreparationStage",
     "ComfyUILatentPreparationStage",
     "LTX2AVLatentPreparationStage",
+    "LTX2TwoStagePreparationStage",
+    "LTX2LatentUpsampleStage",
+    "LTX2RefinementLatentPreparationStage",
     "DenoisingStage",
     "DmdDenoisingStage",
     "LTX2DenoisingStage",

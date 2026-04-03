@@ -26,6 +26,7 @@ class LTX2SamplingParams(SamplingParams):
     # Denoising parameters
     guidance_scale: float = 4.0
     num_inference_steps: int = 40
+    noise_scale: float = 0.0
 
     # Match ltx-pipelines default negative prompt (covers video + audio artifacts).
     negative_prompt: str = (

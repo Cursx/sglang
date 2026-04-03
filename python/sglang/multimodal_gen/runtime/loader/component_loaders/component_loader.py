@@ -212,7 +212,7 @@ class ComponentLoader(ABC):
         self, transformers_or_diffusers: str, component_name: str
     ) -> str:
         # NOTE(FlamingoPg): special for LTX-2 models
-        if component_name == "vocoder" or component_name == "connectors":
+        if component_name in ["vocoder", "connectors", "latent_upsampler"]:
             transformers_or_diffusers = "diffusers"
 
         # NOTE(CloudRipple): special for MOVA models
