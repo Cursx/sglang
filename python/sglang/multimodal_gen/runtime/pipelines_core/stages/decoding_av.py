@@ -83,6 +83,10 @@ class LTX2AVDecodingStage(DecodingStage):
         )
 
         # 2. Decode Audio
+        if batch.extra.get("skip_audio_output", False):
+            self.offload_model()
+            return output_batch
+
         try:
             audio_latents = batch.audio_latents
         except AttributeError:

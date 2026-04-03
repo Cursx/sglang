@@ -609,7 +609,7 @@ class SamplingParams:
 
         user_kwargs = dict(kwargs)
         user_kwargs.pop("diffusers_kwargs", None)
-        user_sampling_params = SamplingParams(*args, **user_kwargs)
+        user_sampling_params = type(sampling_params)(*args, **user_kwargs)
         # TODO: refactor
         sampling_params._merge_with_user_params(
             user_sampling_params, explicit_fields=set(user_kwargs.keys())
@@ -975,11 +975,17 @@ class SamplingParams:
         for field in dataclasses.fields(user_params):
             field_name = field.name
             user_value = getattr(user_params, field_name)
-            default_class_value = getattr(SamplingParams, field_name)
+            if field.default_factory is not dataclasses.MISSING:
+                default_class_value = field.default_factory()
+            elif field.default is not dataclasses.MISSING:
+                default_class_value = field.default
+            else:
+                default_class_value = dataclasses.MISSING
 
-            is_user_modified = user_value != default_class_value or (
-                explicit_fields is not None and field_name in explicit_fields
-            )
+            is_user_modified = (
+                default_class_value is dataclasses.MISSING
+                or user_value != default_class_value
+            ) or (explicit_fields is not None and field_name in explicit_fields)
             is_protected_field = field_name in predefined_fields
             if is_user_modified and (
                 allow_override_protected or not is_protected_field

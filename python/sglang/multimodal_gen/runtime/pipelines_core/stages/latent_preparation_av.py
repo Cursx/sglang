@@ -183,9 +183,7 @@ class LTX2AVLatentPreparationStage(LatentPreparationStage):
         except AttributeError:
             generate_audio = True
         if not generate_audio:
-            batch.audio_latents = None
-            batch.raw_audio_latent_shape = None
-            return batch
+            batch.extra["skip_audio_output"] = True
 
         audio_latents = batch.audio_latents
 

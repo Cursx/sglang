@@ -1,3 +1,5 @@
+import os
+
 import torch
 from diffusers.utils.torch_utils import randn_tensor
 
@@ -8,6 +10,51 @@ from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.logging_utils import init_logger
 
 logger = init_logger(__name__)
+
+
+class LTX2Stage2LoRAControlStage(PipelineStage):
+    def __init__(
+        self,
+        pipeline,
+        enable: bool,
+        lora_path: str | None = None,
+        lora_nickname: str | None = None,
+    ):
+        super().__init__()
+        self.pipeline = pipeline
+        self.enable = enable
+        self.lora_path = lora_path
+        self.lora_nickname = lora_nickname or "stage_2_distilled"
+
+    def forward(self, batch: Req, server_args: ServerArgs) -> Req:
+        if server_args.lora_path is not None:
+            return batch
+
+        if not (
+            hasattr(self.pipeline, "set_lora")
+            and hasattr(self.pipeline, "unmerge_lora_weights")
+            and hasattr(self.pipeline, "is_lora_effective")
+        ):
+            raise TypeError(
+                "LTX2 stage-2 LoRA control requires an LoRA-capable pipeline."
+            )
+
+        if self.enable:
+            if self.lora_path is None or not os.path.exists(self.lora_path):
+                raise ValueError(
+                    "LTX-2 two-stage refinement requires the distilled LoRA weights, "
+                    f"but the resolved path does not exist: {self.lora_path!r}."
+                )
+            self.pipeline.set_lora(
+                self.lora_nickname,
+                self.lora_path,
+                target="transformer",
+                strength=1.0,
+            )
+        elif self.pipeline.is_lora_effective("transformer"):
+            self.pipeline.unmerge_lora_weights(target="transformer")
+
+        return batch
 
 
 class LTX2TwoStagePreparationStage(PipelineStage):
@@ -45,9 +92,17 @@ class LTX2TwoStagePreparationStage(PipelineStage):
 
 
 class LTX2LatentUpsampleStage(PipelineStage):
-    def __init__(self, latent_upsampler):
+    def __init__(self, latent_upsampler, vae):
         super().__init__()
         self.latent_upsampler = latent_upsampler
+        self.vae = vae
+
+    @staticmethod
+    def _denormalize_video_latents(vae, latents: torch.Tensor) -> torch.Tensor:
+        latents_mean = vae.latents_mean.view(1, -1, 1, 1, 1).to(latents)
+        latents_std = vae.latents_std.view(1, -1, 1, 1, 1).to(latents)
+        scaling_factor = float(getattr(vae.config, "scaling_factor", 1.0) or 1.0)
+        return latents * latents_std / scaling_factor + latents_mean
 
     @torch.no_grad()
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
@@ -63,6 +118,7 @@ class LTX2LatentUpsampleStage(PipelineStage):
 
         device = get_local_torch_device()
         latents = batch.latents.to(device=device)
+        latents = self._denormalize_video_latents(self.vae, latents)
         upsampler_dtype = next(self.latent_upsampler.parameters()).dtype
         self.latent_upsampler = self.latent_upsampler.to(
             device=device, dtype=upsampler_dtype
@@ -182,7 +238,7 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
         batch.guidance_scale = 1.0
         batch.sigmas = list(sigma_values)
         batch.timesteps = None
-        batch.num_inference_steps = len(batch.sigmas) - 1
+        batch.num_inference_steps = len(batch.sigmas)
         batch.extra["ltx2_stage_2_noise_scale"] = noise_scale
         return batch
 
