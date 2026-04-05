@@ -94,6 +94,7 @@ __all__ = [
     "DmdDenoisingStage",
     "LTX2DenoisingStage",
     "LTX2AVDenoisingStage",
+    "LTX2RefinementStage",
     "CausalDMDDenoisingStage",
     "EncodingStage",
     "DecodingStage",

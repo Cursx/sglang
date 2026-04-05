@@ -26,12 +26,52 @@ class LTX2Stage2LoRAControlStage(PipelineStage):
         self.lora_path = lora_path
         self.lora_nickname = lora_nickname or "stage_2_distilled"
 
+    def _validate_lora_path(self) -> None:
+        if self.lora_path is None or not os.path.exists(self.lora_path):
+            raise ValueError(
+                "LTX-2 two-stage refinement requires the distilled LoRA weights, "
+                f"but the resolved path does not exist: {self.lora_path!r}."
+            )
+
+    def _get_preload_flag_name(self) -> str:
+        return f"_ltx2_stage2_lora_preloaded_{self.lora_nickname}"
+
+    def _is_preloaded(self) -> bool:
+        return bool(getattr(self.pipeline, self._get_preload_flag_name(), False))
+
+    def _mark_preloaded(self) -> None:
+        setattr(self.pipeline, self._get_preload_flag_name(), True)
+
+    def _reset_runtime_attention_cache(self) -> None:
+        transformer = getattr(self.pipeline, "transformer", None)
+        if transformer is not None and hasattr(
+            transformer, "reset_runtime_attention_cache"
+        ):
+            transformer.reset_runtime_attention_cache()
+
+    def _ensure_preloaded(self) -> None:
+        if self._is_preloaded():
+            return
+
+        self._validate_lora_path()
+        self.pipeline.set_lora(
+            self.lora_nickname,
+            self.lora_path,
+            target="transformer",
+            strength=1.0,
+        )
+        if self.pipeline.is_lora_effective("transformer"):
+            self.pipeline.unmerge_lora_weights(target="transformer")
+        self._reset_runtime_attention_cache()
+        self._mark_preloaded()
+
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
         if server_args.lora_path is not None:
             return batch
 
         if not (
             hasattr(self.pipeline, "set_lora")
+            and hasattr(self.pipeline, "merge_lora_weights")
             and hasattr(self.pipeline, "unmerge_lora_weights")
             and hasattr(self.pipeline, "is_lora_effective")
         ):
@@ -39,20 +79,17 @@ class LTX2Stage2LoRAControlStage(PipelineStage):
                 "LTX2 stage-2 LoRA control requires an LoRA-capable pipeline."
             )
 
-        if self.enable:
-            if self.lora_path is None or not os.path.exists(self.lora_path):
-                raise ValueError(
-                    "LTX-2 two-stage refinement requires the distilled LoRA weights, "
-                    f"but the resolved path does not exist: {self.lora_path!r}."
-                )
-            self.pipeline.set_lora(
-                self.lora_nickname,
-                self.lora_path,
-                target="transformer",
-                strength=1.0,
-            )
-        elif self.pipeline.is_lora_effective("transformer"):
-            self.pipeline.unmerge_lora_weights(target="transformer")
+        if not self.enable:
+            self._ensure_preloaded()
+            if self.pipeline.is_lora_effective("transformer"):
+                self.pipeline.unmerge_lora_weights(target="transformer")
+                self._reset_runtime_attention_cache()
+            return batch
+
+        self._ensure_preloaded()
+        if not self.pipeline.is_lora_effective("transformer"):
+            self.pipeline.merge_lora_weights(target="transformer", strength=1.0)
+            self._reset_runtime_attention_cache()
 
         return batch
 
