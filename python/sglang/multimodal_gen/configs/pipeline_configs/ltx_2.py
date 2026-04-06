@@ -11,6 +11,7 @@ from sglang.multimodal_gen.configs.models.encoders import (
 )
 from sglang.multimodal_gen.configs.models.encoders.gemma_3 import Gemma3Config
 from sglang.multimodal_gen.configs.models.vaes.ltx_audio import LTXAudioVAEConfig
+from sglang.multimodal_gen.configs.models.vaes.ltx_video import LTXVideoVAEConfig
 from sglang.multimodal_gen.configs.pipeline_configs.base import (
     ModelTaskType,
     PipelineConfig,
@@ -170,6 +171,7 @@ class LTX2PipelineConfig(PipelineConfig):
 
     task_type: ModelTaskType = ModelTaskType.TI2V
     skip_input_image_preprocess: bool = True
+    generator_device: str = "cpu"
     dit_config: LTX2Config = field(default_factory=LTX2Config)
 
     # Model architecture
@@ -179,6 +181,7 @@ class LTX2PipelineConfig(PipelineConfig):
     patch_size_t: int = 1
 
     # Audio VAE configuration
+    vae_config: LTXVideoVAEConfig = field(default_factory=LTXVideoVAEConfig)
     audio_vae_config: LTXAudioVAEConfig = field(default_factory=LTXAudioVAEConfig)
     audio_vae_precision: str = "fp32"
     audio_vae_temporal_compression_ratio: int = 4
@@ -195,11 +198,11 @@ class LTX2PipelineConfig(PipelineConfig):
 
     @property
     def vae_scale_factor(self):
-        return getattr(self.vae_config.arch_config, "spatial_compression_ratio", 32)
+        return self.vae_config.arch_config.spatial_compression_ratio
 
     @property
     def vae_temporal_compression(self):
-        return getattr(self.vae_config.arch_config, "temporal_compression_ratio", 8)
+        return self.vae_config.arch_config.temporal_compression_ratio
 
     def prepare_latent_shape(self, batch, batch_size, num_frames):
         """Return packed latent shape [B, seq, C] directly."""
@@ -284,6 +287,7 @@ class LTX2PipelineConfig(PipelineConfig):
             padding="max_length",
             max_length=max_sequence_length,
             truncation=True,
+            add_special_tokens=True,
             return_tensors="pt",
         )
         return text_inputs
