@@ -1,14 +1,18 @@
-import copy
-
 import torch
-from diffusers.utils.torch_utils import randn_tensor
 
 from sglang.multimodal_gen.configs.pipeline_configs.ltx_2 import (
+    calculate_ltx2_mu,
     is_ltx23_native_variant,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
 from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_denoising import (
     LTX2DenoisingStage,
+)
+from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
+    StageValidators as V,
+)
+from sglang.multimodal_gen.runtime.pipelines_core.stages.validators import (
+    VerificationResult,
 )
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.layerwise_offload import OffloadableDiTMixin
@@ -90,7 +94,7 @@ class LTX2AVDenoisingStage(LTX2DenoisingStage):
 
 
 class LTX2RefinementStage(LTX2AVDenoisingStage):
-    """Stage-2 refinement wrapper that re-noises distilled LTX latents once."""
+    """Stage-2 refinement wrapper that runs on pre-noised stage-2 latents."""
 
     def __init__(
         self, transformer, scheduler, distilled_sigmas, vae=None, audio_vae=None
@@ -98,121 +102,87 @@ class LTX2RefinementStage(LTX2AVDenoisingStage):
         super().__init__(transformer, scheduler, vae, audio_vae)
         self.distilled_sigmas = torch.tensor(distilled_sigmas)
 
-    @staticmethod
-    def _randn_like_with_batch_generators(
-        reference_tensor: torch.Tensor, batch: Req
-    ) -> torch.Tensor:
-        generator = getattr(batch, "generator", None)
-        if isinstance(generator, list):
-            bsz = int(reference_tensor.shape[0])
-            valid_generators = [g for g in generator if isinstance(g, torch.Generator)]
-            if len(valid_generators) == 1:
-                generator = valid_generators[0]
-            elif len(valid_generators) >= bsz:
-                generator = valid_generators[:bsz]
-            else:
-                generator = None
-        elif not isinstance(generator, torch.Generator):
-            generator = None
-
-        return randn_tensor(
-            reference_tensor.shape,
-            generator=generator,
-            device=reference_tensor.device,
-            dtype=reference_tensor.dtype,
+    def verify_input(self, batch: Req, server_args: ServerArgs) -> VerificationResult:
+        result = VerificationResult()
+        result.add_check(
+            "timesteps",
+            batch.timesteps,
+            lambda x: x is None or (V.is_tensor(x) and V.min_dims(1)(x)),
         )
-
-    @staticmethod
-    def _reset_stage2_generators(batch: Req) -> None:
-        generator = getattr(batch, "generator", None)
-        if isinstance(generator, list) and generator:
-            generator_device = str(generator[0].device)
-        elif isinstance(generator, torch.Generator):
-            generator_device = str(generator.device)
-        else:
-            generator_device = "cpu"
-
-        seeds = getattr(batch, "seeds", None)
-        if not seeds:
-            seed = getattr(batch, "seed", None)
-            if seed is None:
-                return
-            seeds = [int(seed)]
-
-        batch.generator = [
-            torch.Generator(device=generator_device).manual_seed(int(seed))
-            for seed in seeds
-        ]
-
-    @staticmethod
-    def _should_reset_stage2_generators(server_args: ServerArgs) -> bool:
-        arch_config = getattr(
-            server_args.pipeline_config.vae_config, "arch_config", None
+        result.add_check(
+            "prompt_embeds",
+            batch.prompt_embeds,
+            lambda x: V.is_tensor(x) or V.list_not_empty(x),
         )
-        if arch_config is not None and is_ltx23_native_variant(arch_config):
-            return False
-        return "LTX-2.3" not in str(getattr(server_args, "model_path", ""))
+        result.add_check("image_embeds", batch.image_embeds, V.is_list)
+        result.add_check(
+            "num_inference_steps", batch.num_inference_steps, V.positive_int
+        )
+        result.add_check("guidance_scale", batch.guidance_scale, V.non_negative_float)
+        result.add_check("eta", batch.eta, V.non_negative_float)
+        result.add_check("generator", batch.generator, V.generator_or_list_generators)
+        result.add_check(
+            "do_classifier_free_guidance",
+            batch.do_classifier_free_guidance,
+            V.bool_value,
+        )
+        result.add_check(
+            "negative_prompt_embeds",
+            batch.negative_prompt_embeds,
+            lambda x: (
+                (not batch.do_classifier_free_guidance)
+                or V.is_tensor(x)
+                or V.list_not_empty(x)
+            ),
+        )
+        return result
 
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
-        """Run the distilled refinement schedule on top of the shared AV denoiser."""
         batch.extra["ltx2_phase"] = "stage2"
-        if self._should_reset_stage2_generators(server_args):
-            self._reset_stage2_generators(batch)
-        noise_scale = self.distilled_sigmas[0].to(batch.latents.device)
-        video_noise = self._randn_like_with_batch_generators(batch.latents, batch)
-        batch.latents = video_noise * noise_scale + batch.latents * (1 - noise_scale)
-
-        if isinstance(batch.audio_latents, torch.Tensor):
-            audio_noise = self._randn_like_with_batch_generators(
-                batch.audio_latents, batch
-            )
-            audio_noise_scale = noise_scale.to(
-                batch.audio_latents.device, batch.audio_latents.dtype
-            )
-            batch.audio_latents = (
-                audio_noise * audio_noise_scale
-                + batch.audio_latents * (1 - audio_noise_scale)
-            )
-        if not is_ltx23_native_variant(
-            server_args.pipeline_config.vae_config.arch_config
-        ):
-            batch.latents = batch.latents.to(
-                device=batch.latents.device, dtype=torch.float32
-            )
-            if isinstance(batch.audio_latents, torch.Tensor):
-                batch.audio_latents = batch.audio_latents.to(
-                    device=batch.audio_latents.device, dtype=torch.float32
-                )
-
-        batch.image_latent = None
-        batch.ltx2_num_image_tokens = 0
-
-        original_scheduler = self.scheduler
+        distilled_sigmas = self.distilled_sigmas.to(device=batch.latents.device)
+        original_sigmas = self.scheduler.sigmas
+        original_timesteps = self.scheduler.timesteps
+        had_num_inference_steps = hasattr(self.scheduler, "num_inference_steps")
+        original_num_inference_steps = getattr(
+            self.scheduler, "num_inference_steps", None
+        )
         original_batch_timesteps = batch.timesteps
+        original_batch_sigmas = batch.sigmas
         original_batch_num_inference_steps = batch.num_inference_steps
 
-        self.scheduler = copy.deepcopy(original_scheduler)
-        distilled_device = self.scheduler.sigmas.device
-        self.scheduler.sigmas = self.distilled_sigmas.to(distilled_device)
-        num_steps = len(self.distilled_sigmas) - 1
-        self.scheduler.num_inference_steps = num_steps
-        self.scheduler.timesteps = (self.distilled_sigmas[:num_steps] * 1000).to(
-            distilled_device
-        )
-        self.scheduler._step_index = None
-        self.scheduler._begin_index = None
-
-        batch.timesteps = self.scheduler.timesteps
-        batch.num_inference_steps = num_steps
-        original_do_cfg = batch.do_classifier_free_guidance
-        batch.do_classifier_free_guidance = False
-
         try:
+            mu = calculate_ltx2_mu(batch, server_args.pipeline_config)
+            batch.extra["mu"] = mu
+
+            try:
+                self.scheduler.set_timesteps(
+                    sigmas=distilled_sigmas.tolist(),
+                    device=batch.latents.device,
+                    mu=mu,
+                )
+            except TypeError:
+                self.scheduler.set_timesteps(
+                    sigmas=distilled_sigmas.tolist(),
+                    device=batch.latents.device,
+                )
+
+            batch.timesteps = self.scheduler.timesteps.to(device=batch.latents.device)
+            batch.sigmas = (
+                self.scheduler.sigmas.detach().cpu().tolist()
+                if isinstance(self.scheduler.sigmas, torch.Tensor)
+                else list(distilled_sigmas.tolist())
+            )
+            batch.num_inference_steps = len(batch.timesteps)
             batch = super().forward(batch, server_args)
         finally:
-            self.scheduler = original_scheduler
+            self.scheduler.sigmas = original_sigmas
+            self.scheduler.timesteps = original_timesteps
+            if had_num_inference_steps or original_num_inference_steps is not None:
+                self.scheduler.num_inference_steps = original_num_inference_steps
+            elif hasattr(self.scheduler, "num_inference_steps"):
+                delattr(self.scheduler, "num_inference_steps")
             batch.timesteps = original_batch_timesteps
+            batch.sigmas = original_batch_sigmas
             batch.num_inference_steps = original_batch_num_inference_steps
-            batch.do_classifier_free_guidance = original_do_cfg
 
         return batch

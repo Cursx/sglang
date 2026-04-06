@@ -183,26 +183,32 @@ class LTX2Attention(torch.nn.Module):
                     key_rotary_emb if key_rotary_emb is not None else query_rotary_emb,
                 )
 
-        query = query.unflatten(2, (self.heads, -1)).transpose(1, 2)
-        key = key.unflatten(2, (self.heads, -1)).transpose(1, 2)
-        value = value.unflatten(2, (self.heads, -1)).transpose(1, 2)
+        query = query.unflatten(2, (self.heads, -1))
+        key = key.unflatten(2, (self.heads, -1))
+        value = value.unflatten(2, (self.heads, -1))
 
+        use_masked_sdpa_fallback = False
         if attention_mask is not None:
             if attention_mask.ndim == 2:
                 attention_mask = attention_mask[:, None, None, :]
             elif attention_mask.ndim == 3:
                 attention_mask = attention_mask[:, None, :, :]
-            attention_mask = attention_mask.to(dtype=query.dtype)
+            attention_mask = attention_mask.to(device=query.device, dtype=query.dtype)
+            use_masked_sdpa_fallback = bool(torch.count_nonzero(attention_mask).item())
 
-        hidden_states = F.scaled_dot_product_attention(
-            query,
-            key,
-            value,
-            attn_mask=attention_mask,
-            dropout_p=0.0,
-            is_causal=False,
-        )
-        hidden_states = hidden_states.transpose(1, 2).flatten(2, 3)
+        if use_masked_sdpa_fallback:
+            hidden_states = F.scaled_dot_product_attention(
+                query.transpose(1, 2),
+                key.transpose(1, 2),
+                value.transpose(1, 2),
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+                is_causal=False,
+            ).transpose(1, 2)
+        else:
+            hidden_states = self.attn(query, key, value)
+
+        hidden_states = hidden_states.flatten(2, 3)
         hidden_states = hidden_states.to(query.dtype)
 
         if self.to_gate_logits is not None:

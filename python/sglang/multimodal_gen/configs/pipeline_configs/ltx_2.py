@@ -145,7 +145,9 @@ def is_ltx23_native_variant(arch_config: object) -> bool:
 
 
 def _gemma_postprocess_func(
-    outputs: BaseEncoderOutput, text_inputs: dict
+    outputs: BaseEncoderOutput,
+    text_inputs: dict,
+    pipeline_config: "LTX2PipelineConfig | None" = None,
 ) -> torch.Tensor:
     # LTX-2 requires all hidden states concatenated for the connector
     if hasattr(outputs, "hidden_states") and outputs.hidden_states is not None:

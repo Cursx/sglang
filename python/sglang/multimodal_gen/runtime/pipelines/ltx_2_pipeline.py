@@ -167,51 +167,6 @@ class LTX2SigmaPreparationStage(PipelineStage):
         return batch
 
 
-def _resolve_ltx2_two_stage_component_paths(
-    model_path: str, component_paths: dict[str, str]
-) -> dict[str, str]:
-    resolved = dict(component_paths)
-    auto_resolved = []
-
-    if "spatial_upsampler" not in resolved and "latent_upsampler" in resolved:
-        resolved["spatial_upsampler"] = resolved["latent_upsampler"]
-    elif "latent_upsampler" not in resolved and "spatial_upsampler" in resolved:
-        resolved["latent_upsampler"] = resolved["spatial_upsampler"]
-
-    if "spatial_upsampler" not in resolved:
-        spatial_candidates = [
-            os.path.join(model_path, "latent_upsampler"),
-            os.path.join(model_path, "ltx-2-spatial-upscaler-x2-1.0.safetensors"),
-        ]
-        for candidate in spatial_candidates:
-            if os.path.exists(candidate):
-                resolved["spatial_upsampler"] = candidate
-                resolved["latent_upsampler"] = candidate
-                auto_resolved.append(f"spatial_upsampler={candidate}")
-                break
-
-    if "distilled_lora" not in resolved and "stage_2_distilled_lora" in resolved:
-        resolved["distilled_lora"] = resolved["stage_2_distilled_lora"]
-    elif "stage_2_distilled_lora" not in resolved and "distilled_lora" in resolved:
-        resolved["stage_2_distilled_lora"] = resolved["distilled_lora"]
-
-    if "distilled_lora" not in resolved:
-        distilled_lora = os.path.join(
-            model_path, "ltx-2-19b-distilled-lora-384.safetensors"
-        )
-        if os.path.exists(distilled_lora):
-            resolved["distilled_lora"] = distilled_lora
-            resolved["stage_2_distilled_lora"] = distilled_lora
-            auto_resolved.append(f"distilled_lora={distilled_lora}")
-
-    if auto_resolved:
-        logger.info(
-            "Auto-resolved LTX2 two-stage components: %s", ", ".join(auto_resolved)
-        )
-
-    return resolved
-
-
 class LTX2FlowMatchScheduler(FlowMatchEulerDiscreteScheduler):
     """Override ``_time_shift_exponential`` to use torch f32 instead of numpy f64."""
 

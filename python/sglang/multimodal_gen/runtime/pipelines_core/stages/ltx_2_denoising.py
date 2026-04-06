@@ -377,6 +377,8 @@ class LTX2DenoisingStage(DenoisingStage):
         SP note: when token latents are time-sharded, only the rank that owns the
         *global* first latent frame should apply TI2V conditioning (rank with start_frame==0).
         """
+        if batch.extra.get("ltx2_phase") == "stage2":
+            return False
         if (
             batch.image_latent is None
             or int(getattr(batch, "ltx2_num_image_tokens", 0)) <= 0
@@ -572,7 +574,6 @@ class LTX2DenoisingStage(DenoisingStage):
         server_args: ServerArgs,
     ) -> LTX2DenoisingContext:
         """Extend the base context with LTX-2 audio, SP, and TI2V state."""
-        self._disable_cache_dit_for_request = batch.image_path is not None
         base_ctx = super()._prepare_denoising_loop(batch, server_args)
         ctx = LTX2DenoisingContext(**base_ctx.to_kwargs())
         ctx.is_ltx23_variant = is_ltx23_native_variant(
@@ -589,12 +590,16 @@ class LTX2DenoisingStage(DenoisingStage):
             if phase is not None
             else ("stage1" if ctx.use_ltx23_legacy_one_stage else "one_stage")
         )
+        self._disable_cache_dit_for_request = (
+            batch.image_path is not None and ctx.stage != "stage2"
+        )
         ctx.audio_latents = batch.audio_latents
         # Video and audio keep separate scheduler state throughout the denoising loop.
         ctx.audio_scheduler = copy.deepcopy(self.scheduler)
 
         # Prepare image latents and embeddings for LTX-2 TI2V generation.
-        self._prepare_ltx2_image_latent(batch, server_args)
+        if ctx.stage != "stage2":
+            self._prepare_ltx2_image_latent(batch, server_args)
         do_ti2v = self._should_apply_ltx2_ti2v(batch)
 
         if ctx.use_ltx23_legacy_one_stage:
