@@ -42,7 +42,7 @@ default parameters when initializing and generating videos.
 2. SageSLA is based on SpargeAttn. Install it first with `pip install git+https://github.com/thu-ml/SpargeAttn.git --no-build-isolation`
 3. LTX-2 two-stage generation uses `--pipeline-class-name LTX2TwoStagePipeline`. The spatial upsampler and distilled LoRA are auto-resolved from the model snapshot by default, and can still be overridden with `--spatial-upsampler-path` and `--distilled-lora-path`.
 4. `Lightricks/LTX-2.3` is supported through the bundled native overlay materialization path. One-stage generation uses the default `LTX2Pipeline`; two-stage generation uses `--pipeline-class-name LTX2TwoStagePipeline`.
-5. For LTX models, the `Resolutions` column uses output video `width×height` semantics, matching `sglang generate --width ... --height ...`. LTX-2 text-to-video is listed at `768×512` and `1536×1024`; LTX-2 image-to-video is listed at `896×512` and `1920×1088`.
+5. For LTX models, the `Resolutions` column uses output video `width×height` semantics, matching `sglang generate --width ... --height ...`. LTX-2 text-to-video and LTX-2.3 are listed at `768×512` and `1536×1024`; LTX-2 image-to-video is listed at `896×512` and `1920×1088`.
 6. LTX-2 image-to-video uses `--pipeline-class-name LTX2ImageToVideoPipeline` (one-stage) or `--pipeline-class-name LTX2ImageToVideoTwoStagesPipeline` (two-stage), with `--image-path` to specify the input image.
 
 ### Image Generation Models
