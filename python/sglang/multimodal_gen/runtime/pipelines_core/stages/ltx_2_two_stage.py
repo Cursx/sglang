@@ -281,3 +281,12 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
 
 
 LTX2TwoStageSetupStage = LTX2TwoStagePreparationStage
+
+
+def build_ltx2_two_stage_pipeline_cls(base_cls, pipeline_config_cls):
+    class LTX2TwoStagePipeline(base_cls):
+        pipeline_name = "LTX2TwoStagePipeline"
+
+    LTX2TwoStagePipeline.pipeline_config_cls = pipeline_config_cls
+    LTX2TwoStagePipeline.__module__ = __name__
+    return LTX2TwoStagePipeline

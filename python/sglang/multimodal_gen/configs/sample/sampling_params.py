@@ -975,6 +975,8 @@ class SamplingParams:
         for field in dataclasses.fields(user_params):
             field_name = field.name
             user_value = getattr(user_params, field_name)
+            # use the concrete dataclass field default so subclass defaults and
+            # default_factory fields are treated correctly during merge.
             if field.default_factory is not dataclasses.MISSING:
                 default_class_value = field.default_factory()
             elif field.default is not dataclasses.MISSING:

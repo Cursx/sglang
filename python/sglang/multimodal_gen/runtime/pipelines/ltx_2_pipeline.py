@@ -33,6 +33,9 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages import (
     LTX2TwoStagePreparationStage,
     TextEncodingStage,
 )
+from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_two_stage import (
+    build_ltx2_two_stage_pipeline_cls,
+)
 from sglang.multimodal_gen.runtime.pipelines_core.stages.base import PipelineStage
 from sglang.multimodal_gen.runtime.server_args import ServerArgs
 from sglang.multimodal_gen.runtime.utils.hf_diffusers_utils import maybe_download_lora
@@ -416,10 +419,9 @@ class LTX2ImageToVideoTwoStagesPipeline(LTX2BasePipeline):
         )
         self._add_decoding_stage()
 
-
-class LTX2TwoStagePipeline(LTX2ImageToVideoTwoStagesPipeline):
-    pipeline_name = "LTX2TwoStagePipeline"
-    pipeline_config_cls = LTX2PipelineConfig
+LTX2TwoStagePipeline = build_ltx2_two_stage_pipeline_cls(
+    LTX2ImageToVideoTwoStagesPipeline, LTX2PipelineConfig
+)
 
 
 EntryClass = [
