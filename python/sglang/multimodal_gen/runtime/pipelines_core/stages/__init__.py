@@ -62,6 +62,8 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_two_stage import 
     LTX2LatentUpsampleStage,
     LTX2RefinementLatentPreparationStage,
     LTX2Stage2LoRAControlStage,
+    LTX2Stage2LoRADisableStage,
+    LTX2Stage2LoRAEnableStage,
     LTX2TwoStagePreparationStage,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.text_connector import (
@@ -89,6 +91,8 @@ __all__ = [
     "LTX2TwoStagePreparationStage",
     "LTX2LatentUpsampleStage",
     "LTX2Stage2LoRAControlStage",
+    "LTX2Stage2LoRADisableStage",
+    "LTX2Stage2LoRAEnableStage",
     "LTX2RefinementLatentPreparationStage",
     "DenoisingStage",
     "DmdDenoisingStage",

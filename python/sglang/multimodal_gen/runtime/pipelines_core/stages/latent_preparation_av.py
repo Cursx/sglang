@@ -92,6 +92,32 @@ class LTX2AVLatentPreparationStage(LatentPreparationStage):
         batch_size, channels, latent_length, mel_bins = latent_shape
         return (batch_size, latent_length, channels * mel_bins)
 
+    @classmethod
+    def _resolve_native_video_latent_shape(
+        cls, latent_shape: tuple[int, ...], pipeline_config
+    ) -> tuple[int, int, int]:
+        if len(latent_shape) == 3:
+            return latent_shape
+        if len(latent_shape) == 5:
+            return cls._packed_video_latent_shape(latent_shape, pipeline_config)
+        raise ValueError(
+            "Expected native LTX-2 video latent shape to be packed [B, S, C] or "
+            f"unpacked [B, C, F, H, W], got {latent_shape}."
+        )
+
+    @classmethod
+    def _resolve_native_audio_latent_shape(
+        cls, latent_shape: tuple[int, ...]
+    ) -> tuple[int, int, int]:
+        if len(latent_shape) == 3:
+            return latent_shape
+        if len(latent_shape) == 4:
+            return cls._packed_audio_latent_shape(latent_shape)
+        raise ValueError(
+            "Expected native LTX-2 audio latent shape to be packed [B, S, C] or "
+            f"unpacked [B, C, T, M], got {latent_shape}."
+        )
+
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
         if not is_ltx23_native_variant(
             server_args.pipeline_config.vae_config.arch_config
@@ -153,7 +179,7 @@ class LTX2AVLatentPreparationStage(LatentPreparationStage):
                 batch, batch_size, num_frames
             )
             latents = randn_tensor(
-                self._packed_video_latent_shape(
+                self._resolve_native_video_latent_shape(
                     latent_shape, server_args.pipeline_config
                 ),
                 generator=generator,
@@ -166,9 +192,10 @@ class LTX2AVLatentPreparationStage(LatentPreparationStage):
                 batch.latent_ids = latent_ids.to(device=device)
         else:
             latents = latents.to(device)
-            latents = server_args.pipeline_config.maybe_pack_latents(
-                latents, batch_size, batch
-            )
+            if latents.ndim != 3:
+                latents = server_args.pipeline_config.maybe_pack_latents(
+                    latents, batch_size, batch
+                )
 
         if hasattr(self.scheduler, "init_noise_sigma"):
             latents = latents * self.scheduler.init_noise_sigma
@@ -193,16 +220,17 @@ class LTX2AVLatentPreparationStage(LatentPreparationStage):
             )
 
             audio_latents = randn_tensor(
-                self._packed_audio_latent_shape(latent_shape),
+                self._resolve_native_audio_latent_shape(latent_shape),
                 generator=generator,
                 device=device,
                 dtype=dtype,
             )
         else:
             audio_latents = audio_latents.to(device)
-            audio_latents = server_args.pipeline_config.maybe_pack_audio_latents(
-                audio_latents, batch_size, batch
-            )
+            if audio_latents.ndim != 3:
+                audio_latents = server_args.pipeline_config.maybe_pack_audio_latents(
+                    audio_latents, batch_size, batch
+                )
 
         # Store in batch
         batch.audio_latents = audio_latents

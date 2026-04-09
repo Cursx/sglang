@@ -49,6 +49,12 @@ class LTX2Stage2LoRAControlStage(PipelineStage):
         ):
             transformer.reset_runtime_attention_cache()
 
+    @staticmethod
+    def _synchronize_device() -> None:
+        device_module = torch.get_device_module()
+        if hasattr(device_module, "is_available") and device_module.is_available():
+            device_module.synchronize()
+
     def _ensure_preloaded(self) -> None:
         if self._is_preloaded():
             return
@@ -60,8 +66,10 @@ class LTX2Stage2LoRAControlStage(PipelineStage):
             target="transformer",
             strength=1.0,
         )
+        self._synchronize_device()
         if self.pipeline.is_lora_effective("transformer"):
             self.pipeline.unmerge_lora_weights(target="transformer")
+            self._synchronize_device()
         self._reset_runtime_attention_cache()
         self._mark_preloaded()
 
@@ -83,15 +91,47 @@ class LTX2Stage2LoRAControlStage(PipelineStage):
             self._ensure_preloaded()
             if self.pipeline.is_lora_effective("transformer"):
                 self.pipeline.unmerge_lora_weights(target="transformer")
+                self._synchronize_device()
                 self._reset_runtime_attention_cache()
             return batch
 
         self._ensure_preloaded()
         if not self.pipeline.is_lora_effective("transformer"):
             self.pipeline.merge_lora_weights(target="transformer", strength=1.0)
+            self._synchronize_device()
             self._reset_runtime_attention_cache()
 
         return batch
+
+
+class LTX2Stage2LoRADisableStage(LTX2Stage2LoRAControlStage):
+    def __init__(
+        self,
+        pipeline,
+        lora_path: str | None = None,
+        lora_nickname: str | None = None,
+    ):
+        super().__init__(
+            pipeline=pipeline,
+            enable=False,
+            lora_path=lora_path,
+            lora_nickname=lora_nickname,
+        )
+
+
+class LTX2Stage2LoRAEnableStage(LTX2Stage2LoRAControlStage):
+    def __init__(
+        self,
+        pipeline,
+        lora_path: str | None = None,
+        lora_nickname: str | None = None,
+    ):
+        super().__init__(
+            pipeline=pipeline,
+            enable=True,
+            lora_path=lora_path,
+            lora_nickname=lora_nickname,
+        )
 
 
 class LTX2TwoStagePreparationStage(PipelineStage):

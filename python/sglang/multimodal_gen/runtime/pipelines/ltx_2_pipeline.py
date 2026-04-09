@@ -28,7 +28,8 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages import (
     LTX2LatentUpsampleStage,
     LTX2RefinementLatentPreparationStage,
     LTX2RefinementStage,
-    LTX2Stage2LoRAControlStage,
+    LTX2Stage2LoRADisableStage,
+    LTX2Stage2LoRAEnableStage,
     LTX2TextConnectorStage,
     LTX2TwoStagePreparationStage,
     TextEncodingStage,
@@ -376,9 +377,8 @@ class LTX2ImageToVideoTwoStagesPipeline(LTX2BasePipeline):
             ]
         )
         self.add_stage(
-            LTX2Stage2LoRAControlStage(
+            LTX2Stage2LoRADisableStage(
                 pipeline=self,
-                enable=False,
                 lora_path=stage_2_lora_path,
                 lora_nickname=stage_2_lora_nickname,
             ),
@@ -399,9 +399,8 @@ class LTX2ImageToVideoTwoStagesPipeline(LTX2BasePipeline):
             ]
         )
         self.add_stage(
-            LTX2Stage2LoRAControlStage(
+            LTX2Stage2LoRAEnableStage(
                 pipeline=self,
-                enable=True,
                 lora_path=stage_2_lora_path,
                 lora_nickname=stage_2_lora_nickname,
             ),
