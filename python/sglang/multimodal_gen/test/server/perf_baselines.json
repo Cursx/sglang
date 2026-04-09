@@ -1098,17 +1098,19 @@
         "ltx_2_two_stage_t2v": {
             "stages_ms": {
                 "InputValidationStage": 0.05,
+                "LTX2TwoStagePreparationStage": 0.05,
+                "LTX2Stage2LoRADisableStage": 5600.0,
                 "TextEncodingStage": 1827.03,
-                "LTX2TextConnectorStage": 11.54,
-                "LTX2HalveResolutionStage": 0.1,
-                "LTX2LoRASwitchStage": 13014.75,
+                "LTX2TextConnectorStage": 16.0,
                 "LTX2SigmaPreparationStage": 0.25,
                 "TimestepPreparationStage": 19.26,
                 "LTX2AVLatentPreparationStage": 0.37,
                 "LTX2AVDenoisingStage": 53324.98,
-                "LTX2UpsampleStage": 1894.17,
+                "LTX2LatentUpsampleStage": 100.0,
+                "LTX2RefinementLatentPreparationStage": 1.0,
+                "LTX2Stage2LoRAEnableStage": 150.0,
                 "LTX2RefinementStage": 4330.57,
-                "LTX2AVDecodingStage": 337.68
+                "LTX2AVDecodingStage": 1200.0
             },
             "denoise_step_ms": {
                 "0": 1206.17,
