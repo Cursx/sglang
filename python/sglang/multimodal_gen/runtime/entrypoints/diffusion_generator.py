@@ -213,6 +213,9 @@ class DiffGenerator:
                 output_file_name=user_output_file_name,
                 image_path=image_paths_per_prompt[i],
             )
+            sampling_params.set_explicit_fields(
+                sampling_params_orig.get_explicit_fields()
+            )
             sampling_params._set_output_file_name()
             req = prepare_request(
                 server_args=self.server_args,

@@ -279,6 +279,18 @@ class SamplingParams:
         """Apply model-specific request field overrides after Req creation."""
         return
 
+    def set_explicit_fields(self, explicit_fields: set[str] | None) -> None:
+        """Record which sampling params were explicitly provided by the caller."""
+        object.__setattr__(self, "_explicit_fields", set(explicit_fields or ()))
+
+    def get_explicit_fields(self) -> set[str]:
+        """Return the sampling params explicitly provided by the caller."""
+        return set(getattr(self, "_explicit_fields", set()))
+
+    def is_explicitly_set(self, field_name: str) -> bool:
+        """Check whether a sampling param came from direct user input."""
+        return field_name in getattr(self, "_explicit_fields", set())
+
     def apply_request_extra(self, req: Any) -> None:
         """Merge request extras (model specific, e.g., LTX2.3) into an already-created pipeline request."""
         req.extra.update(self.build_request_extra())
@@ -563,6 +575,7 @@ class SamplingParams:
         model_id = kwargs.pop("model_id", None)
         model_info = get_model_info(model_path, backend=backend, model_id=model_id)
         sampling_params: SamplingParams = model_info.sampling_param_cls(**kwargs)
+        sampling_params.set_explicit_fields(set(kwargs.keys()))
         return sampling_params
 
     @staticmethod
@@ -618,7 +631,7 @@ class SamplingParams:
         sampling_params._merge_with_user_params(
             user_sampling_params, explicit_fields=set(user_kwargs.keys())
         )
-        sampling_params._explicit_fields = set(user_kwargs.keys())
+        sampling_params.set_explicit_fields(set(user_kwargs.keys()))
         sampling_params._adjust(server_args)
 
         sampling_params._validate_with_pipeline_config(server_args.pipeline_config)
