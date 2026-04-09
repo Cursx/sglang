@@ -43,6 +43,9 @@ class LTX2SamplingParams(SamplingParams):
         "inconsistent tone, cinematic oversaturation, stylized filters, or AI artifacts."
     )
 
+    def apply_request_field_overrides(self, req: Any) -> None:
+        req.generate_audio = self.generate_audio
+
 
 @dataclasses.dataclass
 class LTX23SamplingParams(LTX2SamplingParams):

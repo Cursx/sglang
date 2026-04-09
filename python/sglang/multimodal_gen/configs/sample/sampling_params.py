@@ -275,6 +275,10 @@ class SamplingParams:
             extra["explicit_fields"] = sorted(explicit_fields)
         return extra
 
+    def apply_request_field_overrides(self, req: Any) -> None:
+        """Apply model-specific request field overrides after Req creation."""
+        return
+
     def apply_request_extra(self, req: Any) -> None:
         """Merge request extras (model specific, e.g., LTX2.3) into an already-created pipeline request."""
         req.extra.update(self.build_request_extra())

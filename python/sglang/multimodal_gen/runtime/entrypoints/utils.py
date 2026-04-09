@@ -289,14 +289,7 @@ def prepare_request(
         sampling_params=sampling_params,
         VSA_sparsity=server_args.attention_backend_config.VSA_sparsity,
     )
-    sampling_param_fields = set(
-        getattr(type(sampling_params), "__dataclass_fields__", {})
-    )
-    for field_name in Req.__dataclass_fields__:
-        if field_name in {"sampling_params", "n_tokens"}:
-            continue
-        if field_name in sampling_param_fields:
-            setattr(req, field_name, getattr(sampling_params, field_name))
+    sampling_params.apply_request_field_overrides(req)
     sampling_params.apply_request_extra(req)
 
     req.adjust_size(server_args)
