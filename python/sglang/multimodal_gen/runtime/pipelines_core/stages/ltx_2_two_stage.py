@@ -312,7 +312,9 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
             noise_scale,
             generator=batch.generator,
         )
-        if self.preserve_conditioned_first_frame and self._has_image_conditioning(batch):
+        if self.preserve_conditioned_first_frame and self._has_image_conditioning(
+            batch
+        ):
             noised_video_latents[:, :, 0] = normalized_video_latents[:, :, 0]
 
         packed_latents = server_args.pipeline_config.maybe_pack_latents(
