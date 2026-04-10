@@ -132,21 +132,15 @@ class InputValidationStage(PipelineStage):
             calculated_size = config.prepare_calculated_size(final_image)
 
             # adjust output image size
-            if calculated_size is None:
-                calculated_size = final_image.size
-
             if calculated_size is not None:
                 calculated_width, calculated_height = calculated_size
-                width = (
-                    batch.width
-                    if batch.is_explicitly_set("width") and batch.width is not None
-                    else calculated_width
-                )
-                height = (
-                    batch.height
-                    if batch.is_explicitly_set("height") and batch.height is not None
-                    else calculated_height
-                )
+                explicit_fields = set(batch.extra.get("explicit_fields", []))
+                width_is_explicit = "width" in explicit_fields
+                height_is_explicit = "height" in explicit_fields
+
+                width = batch.width if width_is_explicit else calculated_width
+                height = batch.height if height_is_explicit else calculated_height
+
                 multiple_of = (
                     server_args.pipeline_config.vae_config.get_vae_scale_factor() * 2
                 )
