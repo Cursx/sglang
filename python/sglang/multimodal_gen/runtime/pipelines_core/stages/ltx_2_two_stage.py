@@ -207,10 +207,11 @@ class LTX2LatentUpsampleStage(PipelineStage):
 
 
 class LTX2RefinementLatentPreparationStage(PipelineStage):
-    def __init__(self, vae, audio_vae):
+    def __init__(self, vae, audio_vae, preserve_conditioned_first_frame: bool):
         super().__init__()
         self.vae = vae
         self.audio_vae = audio_vae
+        self.preserve_conditioned_first_frame = preserve_conditioned_first_frame
 
     @staticmethod
     def _create_noised_state(
@@ -247,6 +248,38 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
             return (latents - latents_mean.view(1, -1)) / latents_std.view(1, -1)
         return (latents - latents_mean) / latents_std
 
+    @staticmethod
+    def _reset_stage2_generators(batch: Req) -> None:
+        generator = getattr(batch, "generator", None)
+        if isinstance(generator, list) and generator:
+            generator_device = str(generator[0].device)
+        elif isinstance(generator, torch.Generator):
+            generator_device = str(generator.device)
+        else:
+            generator_device = "cpu"
+
+        seeds = getattr(batch, "seeds", None)
+        if not seeds:
+            seed = getattr(batch, "seed", None)
+            if seed is None:
+                return
+            seeds = [int(seed)]
+
+        batch.generator = [
+            torch.Generator(device=generator_device).manual_seed(int(seed))
+            for seed in seeds
+        ]
+
+    @staticmethod
+    def _has_image_conditioning(batch: Req) -> bool:
+        if batch.image_path is not None:
+            return True
+        if batch.condition_image is not None:
+            return True
+        if batch.image_latent is not None:
+            return True
+        return int(getattr(batch, "ltx2_num_image_tokens", 0)) > 0
+
     @torch.no_grad()
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
         if batch.latents is None:
@@ -265,6 +298,8 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
         if not sigma_values:
             raise ValueError("Missing `stage_2_distilled_sigmas` in pipeline config.")
         noise_scale = float(sigma_values[0])
+        batch.extra["ltx2_phase"] = "stage2"
+        self._reset_stage2_generators(batch)
 
         device = get_local_torch_device()
         dtype = batch.latents.dtype
@@ -272,24 +307,13 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
         normalized_video_latents = self._normalize_video_latents(
             self.vae, video_latents
         )
-
-        conditioning_mask = torch.zeros(
-            (
-                normalized_video_latents.shape[0],
-                1,
-                normalized_video_latents.shape[2],
-                normalized_video_latents.shape[3],
-                normalized_video_latents.shape[4],
-            ),
-            device=device,
-            dtype=normalized_video_latents.dtype,
-        )
-        conditioning_mask[:, :, 0] = 1.0
         noised_video_latents = self._create_noised_state(
             normalized_video_latents,
-            noise_scale * (1 - conditioning_mask),
+            noise_scale,
             generator=batch.generator,
         )
+        if self.preserve_conditioned_first_frame and self._has_image_conditioning(batch):
+            noised_video_latents[:, :, 0] = normalized_video_latents[:, :, 0]
 
         packed_latents = server_args.pipeline_config.maybe_pack_latents(
             noised_video_latents, noised_video_latents.shape[0], batch
@@ -326,6 +350,11 @@ LTX2TwoStageSetupStage = LTX2TwoStagePreparationStage
 def build_ltx2_two_stage_pipeline_cls(base_cls, pipeline_config_cls):
     class LTX2TwoStagePipeline(base_cls):
         pipeline_name = "LTX2TwoStagePipeline"
+
+        def create_pipeline_stages(self, server_args: ServerArgs):
+            self._create_two_stage_pipeline_stages(
+                server_args, preserve_conditioned_first_frame=False
+            )
 
     LTX2TwoStagePipeline.pipeline_config_cls = pipeline_config_cls
     LTX2TwoStagePipeline.__module__ = __name__

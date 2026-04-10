@@ -365,7 +365,12 @@ class LTX2ImageToVideoTwoStagesPipeline(LTX2BasePipeline):
             shift_terminal=None,
         )
 
-    def create_pipeline_stages(self, server_args: ServerArgs):
+    def _create_two_stage_pipeline_stages(
+        self,
+        server_args: ServerArgs,
+        *,
+        preserve_conditioned_first_frame: bool,
+    ):
         stage_2_lora_path = self._resolve_stage_2_lora_path(server_args)
         stage_2_lora_nickname = (
             server_args.pipeline_config.stage_2_distilled_lora_nickname
@@ -395,6 +400,7 @@ class LTX2ImageToVideoTwoStagesPipeline(LTX2BasePipeline):
                 LTX2RefinementLatentPreparationStage(
                     vae=self.get_module("vae"),
                     audio_vae=self.get_module("audio_vae"),
+                    preserve_conditioned_first_frame=preserve_conditioned_first_frame,
                 ),
             ]
         )
@@ -417,6 +423,11 @@ class LTX2ImageToVideoTwoStagesPipeline(LTX2BasePipeline):
             stage_name="l_t_x2_refinement_stage",
         )
         self._add_decoding_stage()
+
+    def create_pipeline_stages(self, server_args: ServerArgs):
+        self._create_two_stage_pipeline_stages(
+            server_args, preserve_conditioned_first_frame=True
+        )
 
 
 LTX2TwoStagePipeline = build_ltx2_two_stage_pipeline_cls(
