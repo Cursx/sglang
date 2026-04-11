@@ -65,41 +65,53 @@ class LTX2Stage2LoRAControlStage(PipelineStage):
             self.lora_path,
             target="transformer",
             strength=1.0,
+            merge_weights=False,
         )
-        self._synchronize_device()
-        if self.pipeline.is_lora_effective("transformer"):
-            self.pipeline.unmerge_lora_weights(target="transformer")
-            self._synchronize_device()
-        self._reset_runtime_attention_cache()
         self._mark_preloaded()
 
     def forward(self, batch: Req, server_args: ServerArgs) -> Req:
-        if server_args.lora_path is not None:
-            return batch
-
         if not (
             hasattr(self.pipeline, "set_lora")
-            and hasattr(self.pipeline, "merge_lora_weights")
-            and hasattr(self.pipeline, "unmerge_lora_weights")
-            and hasattr(self.pipeline, "is_lora_effective")
+            and hasattr(self.pipeline, "deactivate_lora_weights")
         ):
             raise TypeError(
                 "LTX2 stage-2 LoRA control requires an LoRA-capable pipeline."
             )
 
         if not self.enable:
-            self._ensure_preloaded()
-            if self.pipeline.is_lora_effective("transformer"):
-                self.pipeline.unmerge_lora_weights(target="transformer")
-                self._synchronize_device()
-                self._reset_runtime_attention_cache()
-            return batch
-
-        self._ensure_preloaded()
-        if not self.pipeline.is_lora_effective("transformer"):
-            self.pipeline.merge_lora_weights(target="transformer", strength=1.0)
+            if server_args.lora_path is not None:
+                self.pipeline.set_lora(
+                    server_args.lora_nickname,
+                    server_args.lora_path,
+                    target="transformer",
+                    strength=float(server_args.lora_scale),
+                )
+            else:
+                self._ensure_preloaded()
+                self.pipeline.deactivate_lora_weights(target="transformer")
             self._synchronize_device()
             self._reset_runtime_attention_cache()
+            return batch
+
+        if server_args.lora_path is not None:
+            self._validate_lora_path()
+            self.pipeline.set_lora(
+                [server_args.lora_nickname, self.lora_nickname],
+                [server_args.lora_path, self.lora_path],
+                target=["transformer", "transformer"],
+                strength=[float(server_args.lora_scale), 1.0],
+                merge_weights=True,
+            )
+        else:
+            self._ensure_preloaded()
+            self.pipeline.set_lora(
+                self.lora_nickname,
+                target="transformer",
+                strength=1.0,
+                merge_weights=False,
+            )
+        self._synchronize_device()
+        self._reset_runtime_attention_cache()
 
         return batch
 
@@ -307,21 +319,28 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
         normalized_video_latents = self._normalize_video_latents(
             self.vae, video_latents
         )
+        packed_video_latents = server_args.pipeline_config.maybe_pack_latents(
+            normalized_video_latents, normalized_video_latents.shape[0], batch
+        )
         noised_video_latents = self._create_noised_state(
-            normalized_video_latents,
+            packed_video_latents,
             noise_scale,
             generator=batch.generator,
         )
         if self.preserve_conditioned_first_frame and self._has_image_conditioning(
             batch
         ):
-            noised_video_latents[:, :, 0] = normalized_video_latents[:, :, 0]
+            _, tokens_per_frame = (
+                server_args.pipeline_config._infer_video_latent_frames_and_tokens_per_frame(
+                    batch, int(packed_video_latents.shape[1])
+                )
+            )
+            noised_video_latents[:, :tokens_per_frame, :] = packed_video_latents[
+                :, :tokens_per_frame, :
+            ]
 
-        packed_latents = server_args.pipeline_config.maybe_pack_latents(
-            noised_video_latents, noised_video_latents.shape[0], batch
-        )
-        batch.latents = packed_latents
-        batch.raw_latent_shape = packed_latents.shape
+        batch.latents = noised_video_latents
+        batch.raw_latent_shape = noised_video_latents.shape
         batch.image_latent = None
         batch.ltx2_num_image_tokens = 0
         batch.condition_image = None

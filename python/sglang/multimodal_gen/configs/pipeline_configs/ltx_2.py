@@ -38,10 +38,19 @@ def get_ltx2_packed_video_seq_len(batch, pipeline_config: "LTX2PipelineConfig") 
     latent_num_frames = (int(batch.num_frames) - 1) // int(
         pipeline_config.vae_temporal_compression
     ) + 1
-    _, seq_len, _ = pipeline_config.prepare_latent_shape(
+    latent_shape = pipeline_config.prepare_latent_shape(
         batch, batch_size=1, num_frames=latent_num_frames
     )
-    return int(seq_len)
+    if len(latent_shape) == 3:
+        _, seq_len, _ = latent_shape
+        return int(seq_len)
+    if len(latent_shape) == 5:
+        _, _, _, height, width = latent_shape
+        post_patch_num_frames = latent_num_frames // int(pipeline_config.patch_size_t)
+        post_patch_height = int(height) // int(pipeline_config.patch_size)
+        post_patch_width = int(width) // int(pipeline_config.patch_size)
+        return int(post_patch_num_frames * post_patch_height * post_patch_width)
+    raise ValueError(f"Unsupported latent shape for packed seq len: {latent_shape}")
 
 
 def calculate_ltx2_mu(batch, pipeline_config: "LTX2PipelineConfig") -> float:
@@ -207,7 +216,12 @@ class LTX2PipelineConfig(PipelineConfig):
         return self.vae_config.arch_config.temporal_compression_ratio
 
     def prepare_latent_shape(self, batch, batch_size, num_frames):
-        """Return packed latent shape [B, seq, C] directly."""
+        if not is_ltx23_native_variant(self.vae_config.arch_config):
+            height = batch.height // self.vae_scale_factor
+            width = batch.width // self.vae_scale_factor
+            return (batch_size, self.in_channels, num_frames, height, width)
+
+        # Native LTX-2.3 samples noise directly in packed token space.
         height = batch.height // self.vae_scale_factor
         width = batch.width // self.vae_scale_factor
 
@@ -229,7 +243,11 @@ class LTX2PipelineConfig(PipelineConfig):
 
         sample_rate = self.audio_vae_config.arch_config.sample_rate
         hop_length = self.audio_vae_config.arch_config.mel_hop_length
-        temporal_compression = self.audio_vae_temporal_compression_ratio
+        temporal_compression = (
+            self.audio_vae_temporal_compression_ratio
+            if is_ltx23_native_variant(self.vae_config.arch_config)
+            else self.audio_vae_config.arch_config.temporal_compression_ratio
+        )
 
         latents_per_second = (
             float(sample_rate) / float(hop_length) / float(temporal_compression)
@@ -237,15 +255,25 @@ class LTX2PipelineConfig(PipelineConfig):
         latent_length = round(duration_s * latents_per_second)
 
         num_mel_bins = self.audio_vae_config.arch_config.mel_bins
-        mel_compression_ratio = self.audio_vae_mel_compression_ratio
+        mel_compression_ratio = (
+            self.audio_vae_mel_compression_ratio
+            if is_ltx23_native_variant(self.vae_config.arch_config)
+            else self.audio_vae_config.arch_config.mel_compression_ratio
+        )
         latent_mel_bins = num_mel_bins // mel_compression_ratio
 
         # Default to 8
         num_channels_latents = self.audio_vae_config.arch_config.latent_channels
 
-        shape = (batch_size, latent_length, num_channels_latents * latent_mel_bins)
+        if not is_ltx23_native_variant(self.vae_config.arch_config):
+            return (
+                batch_size,
+                num_channels_latents,
+                latent_length,
+                latent_mel_bins,
+            )
 
-        return shape
+        return (batch_size, latent_length, num_channels_latents * latent_mel_bins)
 
     # Text encoding stage (Gemma)
     # LTX-2 needs separate contexts for video/audio streams. We model this as

@@ -1,7 +1,6 @@
 import torch
 
 from sglang.multimodal_gen.configs.pipeline_configs.ltx_2 import (
-    calculate_ltx2_mu,
     is_ltx23_native_variant,
 )
 from sglang.multimodal_gen.runtime.pipelines_core.schedule_batch import Req
@@ -149,30 +148,19 @@ class LTX2RefinementStage(LTX2AVDenoisingStage):
         original_batch_timesteps = batch.timesteps
         original_batch_sigmas = batch.sigmas
         original_batch_num_inference_steps = batch.num_inference_steps
-
         try:
-            mu = calculate_ltx2_mu(batch, server_args.pipeline_config)
-            batch.extra["mu"] = mu
+            num_refinement_steps = len(distilled_sigmas) - 1
+            self.scheduler.sigmas = distilled_sigmas
+            self.scheduler.timesteps = (
+                distilled_sigmas[:num_refinement_steps] * 1000
+            ).to(device=batch.latents.device)
+            self.scheduler._step_index = None
+            self.scheduler._begin_index = None
+            self.scheduler.num_inference_steps = num_refinement_steps
 
-            try:
-                self.scheduler.set_timesteps(
-                    sigmas=distilled_sigmas.tolist(),
-                    device=batch.latents.device,
-                    mu=mu,
-                )
-            except TypeError:
-                self.scheduler.set_timesteps(
-                    sigmas=distilled_sigmas.tolist(),
-                    device=batch.latents.device,
-                )
-
-            batch.timesteps = self.scheduler.timesteps.to(device=batch.latents.device)
-            batch.sigmas = (
-                self.scheduler.sigmas.detach().cpu().tolist()
-                if isinstance(self.scheduler.sigmas, torch.Tensor)
-                else list(distilled_sigmas.tolist())
-            )
-            batch.num_inference_steps = len(batch.timesteps)
+            batch.timesteps = self.scheduler.timesteps
+            batch.sigmas = distilled_sigmas.detach().cpu().tolist()
+            batch.num_inference_steps = num_refinement_steps
             batch = super().forward(batch, server_args)
         finally:
             self.scheduler.sigmas = original_sigmas
