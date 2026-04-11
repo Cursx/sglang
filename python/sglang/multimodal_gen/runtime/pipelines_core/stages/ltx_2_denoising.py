@@ -143,6 +143,19 @@ class LTX2DenoisingStage(DenoisingStage):
     ) -> dict[str, object] | None:
         if stage != "stage1":
             return None
+
+        if is_ltx23_native_variant(server_args.pipeline_config.vae_config.arch_config):
+            return batch.extra.get("ltx2_stage1_guider_params")
+
+        pipeline_ref = getattr(self, "pipeline", None)
+        pipeline = pipeline_ref() if callable(pipeline_ref) else pipeline_ref
+        pipeline_name = getattr(pipeline, "pipeline_name", None)
+        if pipeline_name not in {
+            "LTX2ImageToVideoPipeline",
+            "LTX2ImageToVideoTwoStagesPipeline",
+        }:
+            return None
+
         return batch.extra.get("ltx2_stage1_guider_params")
 
     @staticmethod
@@ -486,10 +499,14 @@ class LTX2DenoisingStage(DenoisingStage):
         if condition_image_encoder is None:
             self.vae = self.vae.to(device=latents_device, dtype=encode_dtype)
 
-        video_condition = self._pil_to_normed_tensor(batch.condition_image).to(
-            device=latents_device, dtype=encode_dtype
+        video_condition = self._resize_center_crop_tensor(
+            conditioned_img,
+            width=int(batch.width),
+            height=int(batch.height),
+            device=latents_device,
+            dtype=encode_dtype,
+            apply_codec_compression=False,
         )
-        video_condition = video_condition.unsqueeze(2)
 
         with torch.autocast(
             device_type=current_platform.device_type,

@@ -311,6 +311,7 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
             raise ValueError("Missing `stage_2_distilled_sigmas` in pipeline config.")
         noise_scale = float(sigma_values[0])
         batch.extra["ltx2_phase"] = "stage2"
+        self._reset_stage2_generators(batch)
 
         device = get_local_torch_device()
         dtype = batch.latents.dtype
