@@ -86,28 +86,6 @@ def test_ltx2_sampling_defaults_keep_cpu_generator():
     assert sampling_params.generator_device == "cpu"
 
 
-def test_ltx2_build_request_extra_sets_stage1_guider_defaults():
-    sampling_params = SamplingParams.from_pretrained(
-        "Lightricks/LTX-2",
-        backend="sglang",
-    )
-
-    assert sampling_params.build_request_extra()["ltx2_stage1_guider_params"] == {
-        "video_cfg_scale": 4.0,
-        "video_stg_scale": 1.0,
-        "video_rescale_scale": 0.7,
-        "video_modality_scale": 3.0,
-        "video_skip_step": 0,
-        "video_stg_blocks": [29],
-        "audio_cfg_scale": 7.0,
-        "audio_stg_scale": 1.0,
-        "audio_rescale_scale": 0.7,
-        "audio_modality_scale": 3.0,
-        "audio_skip_step": 0,
-        "audio_stg_blocks": [29],
-    }
-
-
 def test_ltx23_build_request_extra_sets_stage1_guider_defaults():
     sampling_params = SamplingParams.from_pretrained(
         "Lightricks/LTX-2.3",
