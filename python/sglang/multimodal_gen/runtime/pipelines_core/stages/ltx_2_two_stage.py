@@ -311,7 +311,6 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
             raise ValueError("Missing `stage_2_distilled_sigmas` in pipeline config.")
         noise_scale = float(sigma_values[0])
         batch.extra["ltx2_phase"] = "stage2"
-        self._reset_stage2_generators(batch)
 
         device = get_local_torch_device()
         dtype = batch.latents.dtype
@@ -327,16 +326,34 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
             noise_scale,
             generator=batch.generator,
         )
-        if self.preserve_conditioned_first_frame and self._has_image_conditioning(
-            batch
+        if (
+            self.preserve_conditioned_first_frame
+            and self._has_image_conditioning(batch)
+            and batch.image_path is None
         ):
-            _, tokens_per_frame = (
-                server_args.pipeline_config._infer_video_latent_frames_and_tokens_per_frame(
-                    batch, int(packed_video_latents.shape[1])
+            seq_len = int(packed_video_latents.shape[1])
+            preserved_tokens = int(getattr(batch, "ltx2_num_image_tokens", 0))
+            inferred_tokens_per_frame = None
+            if batch.debug or preserved_tokens <= 0 or preserved_tokens > seq_len:
+                _, inferred_tokens_per_frame = (
+                    server_args.pipeline_config._infer_video_latent_frames_and_tokens_per_frame(
+                        batch, seq_len
+                    )
                 )
-            )
-            noised_video_latents[:, :tokens_per_frame, :] = packed_video_latents[
-                :, :tokens_per_frame, :
+            if preserved_tokens <= 0 or preserved_tokens > seq_len:
+                preserved_tokens = int(inferred_tokens_per_frame)
+            elif (
+                batch.debug
+                and inferred_tokens_per_frame is not None
+                and int(inferred_tokens_per_frame) != preserved_tokens
+            ):
+                logger.info(
+                    "LTX-2 stage2 preserving %d image tokens; inferred tokens_per_frame=%d",
+                    preserved_tokens,
+                    int(inferred_tokens_per_frame),
+                )
+            noised_video_latents[:, :preserved_tokens, :] = packed_video_latents[
+                :, :preserved_tokens, :
             ]
 
         batch.latents = noised_video_latents

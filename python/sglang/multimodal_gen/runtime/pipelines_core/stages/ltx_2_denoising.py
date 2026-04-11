@@ -301,7 +301,16 @@ class LTX2DenoisingStage(DenoisingStage):
     def _resize_center_crop(
         img: PIL.Image.Image, *, width: int, height: int
     ) -> PIL.Image.Image:
-        return img.resize((width, height), resample=PIL.Image.Resampling.BILINEAR)
+        src_w, src_h = img.size
+        scale = max(height / src_h, width / src_w)
+        resized_h = math.ceil(src_h * scale)
+        resized_w = math.ceil(src_w * scale)
+        resized = img.resize(
+            (resized_w, resized_h), resample=PIL.Image.Resampling.BILINEAR
+        )
+        left = max((resized_w - width) // 2, 0)
+        top = max((resized_h - height) // 2, 0)
+        return resized.crop((left, top, left + width, top + height))
 
     @staticmethod
     def _apply_video_codec_compression(
@@ -377,8 +386,6 @@ class LTX2DenoisingStage(DenoisingStage):
         SP note: when token latents are time-sharded, only the rank that owns the
         *global* first latent frame should apply TI2V conditioning (rank with start_frame==0).
         """
-        if batch.extra.get("ltx2_phase") == "stage2":
-            return False
         if (
             batch.image_latent is None
             or int(getattr(batch, "ltx2_num_image_tokens", 0)) <= 0
@@ -455,8 +462,8 @@ class LTX2DenoisingStage(DenoisingStage):
             else batch.image_path
         )
 
-        img = load_image(image_path)
-        img_array = np.array(img).astype(np.uint8)[..., :3]
+        conditioned_img = load_image(image_path).convert("RGB")
+        img_array = np.array(conditioned_img).astype(np.uint8)[..., :3]
         img_array = self._apply_video_codec_compression(img_array, crf=33)
         conditioned_img = PIL.Image.fromarray(img_array)
         batch.condition_image = self._resize_center_crop(
@@ -479,14 +486,10 @@ class LTX2DenoisingStage(DenoisingStage):
         if condition_image_encoder is None:
             self.vae = self.vae.to(device=latents_device, dtype=encode_dtype)
 
-        video_condition = self._resize_center_crop_tensor(
-            conditioned_img,
-            width=int(batch.width),
-            height=int(batch.height),
-            device=latents_device,
-            dtype=encode_dtype,
-            apply_codec_compression=False,
+        video_condition = self._pil_to_normed_tensor(batch.condition_image).to(
+            device=latents_device, dtype=encode_dtype
         )
+        video_condition = video_condition.unsqueeze(2)
 
         with torch.autocast(
             device_type=current_platform.device_type,
@@ -590,16 +593,13 @@ class LTX2DenoisingStage(DenoisingStage):
             if phase is not None
             else ("stage1" if ctx.use_ltx23_legacy_one_stage else "one_stage")
         )
-        self._disable_cache_dit_for_request = (
-            batch.image_path is not None and ctx.stage != "stage2"
-        )
+        self._disable_cache_dit_for_request = batch.image_path is not None
         ctx.audio_latents = batch.audio_latents
         # Video and audio keep separate scheduler state throughout the denoising loop.
         ctx.audio_scheduler = copy.deepcopy(self.scheduler)
 
         # Prepare image latents and embeddings for LTX-2 TI2V generation.
-        if ctx.stage != "stage2":
-            self._prepare_ltx2_image_latent(batch, server_args)
+        self._prepare_ltx2_image_latent(batch, server_args)
         do_ti2v = self._should_apply_ltx2_ti2v(batch)
 
         if ctx.use_ltx23_legacy_one_stage:

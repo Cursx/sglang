@@ -28,6 +28,20 @@ class LTX2SamplingParams(SamplingParams):
     num_inference_steps: int = 40
     noise_scale: float = 0.0
 
+    video_cfg_scale: float | None = None
+    video_stg_scale: float = 1.0
+    video_rescale_scale: float = 0.7
+    video_modality_scale: float = 3.0
+    video_skip_step: int = 0
+    video_stg_blocks: list[int] = field(default_factory=lambda: [29])
+
+    audio_cfg_scale: float = 7.0
+    audio_stg_scale: float = 1.0
+    audio_rescale_scale: float = 0.7
+    audio_modality_scale: float = 3.0
+    audio_skip_step: int = 0
+    audio_stg_blocks: list[int] = field(default_factory=lambda: [29])
+
     # Match ltx-pipelines default negative prompt (covers video + audio artifacts).
     negative_prompt: str = (
         "blurry, out of focus, overexposed, underexposed, low contrast, washed out colors, excessive noise, "
@@ -46,33 +60,14 @@ class LTX2SamplingParams(SamplingParams):
     def apply_request_field_overrides(self, req: Any) -> None:
         req.generate_audio = self.generate_audio
 
-
-@dataclasses.dataclass
-class LTX23SamplingParams(LTX2SamplingParams):
-    """Sampling parameters matching official LTX-2.3 one-stage defaults."""
-
-    generator_device: str = "cuda"
-    guidance_scale: float = 3.0
-    num_inference_steps: int = 30
-
-    video_cfg_scale: float = 3.0
-    video_stg_scale: float = 1.0
-    video_rescale_scale: float = 0.7
-    video_modality_scale: float = 3.0
-    video_skip_step: int = 0
-    video_stg_blocks: list[int] = field(default_factory=lambda: [28])
-
-    audio_cfg_scale: float = 7.0
-    audio_stg_scale: float = 1.0
-    audio_rescale_scale: float = 0.7
-    audio_modality_scale: float = 3.0
-    audio_skip_step: int = 0
-    audio_stg_blocks: list[int] = field(default_factory=lambda: [28])
-
     def build_request_extra(self) -> dict[str, Any]:
         extra = super().build_request_extra()
         extra["ltx2_stage1_guider_params"] = {
-            "video_cfg_scale": self.video_cfg_scale,
+            "video_cfg_scale": (
+                self.video_cfg_scale
+                if self.video_cfg_scale is not None
+                else self.guidance_scale
+            ),
             "video_stg_scale": self.video_stg_scale,
             "video_rescale_scale": self.video_rescale_scale,
             "video_modality_scale": self.video_modality_scale,
@@ -86,3 +81,26 @@ class LTX23SamplingParams(LTX2SamplingParams):
             "audio_stg_blocks": self.audio_stg_blocks,
         }
         return extra
+
+
+@dataclasses.dataclass
+class LTX23SamplingParams(LTX2SamplingParams):
+    """Sampling parameters matching official LTX-2.3 one-stage defaults."""
+
+    generator_device: str = "cuda"
+    guidance_scale: float = 3.0
+    num_inference_steps: int = 30
+
+    video_cfg_scale: float | None = 3.0
+    video_stg_scale: float = 1.0
+    video_rescale_scale: float = 0.7
+    video_modality_scale: float = 3.0
+    video_skip_step: int = 0
+    video_stg_blocks: list[int] = field(default_factory=lambda: [28])
+
+    audio_cfg_scale: float = 7.0
+    audio_stg_scale: float = 1.0
+    audio_rescale_scale: float = 0.7
+    audio_modality_scale: float = 3.0
+    audio_skip_step: int = 0
+    audio_stg_blocks: list[int] = field(default_factory=lambda: [28])
