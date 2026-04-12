@@ -129,9 +129,10 @@ class LTX2AVLatentPreparationStage(LatentPreparationStage):
             except AttributeError:
                 generate_audio = True
             if not generate_audio:
-                batch.audio_latents = None
-                batch.raw_audio_latent_shape = None
-                return batch
+                # LTX-2 AV denoising still expects audio latents even when the
+                # caller only wants a video output. Match the native path by
+                # preparing audio latents and letting decode skip waveform output.
+                batch.extra["skip_audio_output"] = True
 
             device = get_local_torch_device()
             dtype = self._get_latent_dtype(batch, server_args)
