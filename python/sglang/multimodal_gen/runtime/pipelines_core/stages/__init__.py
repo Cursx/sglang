@@ -58,6 +58,7 @@ from sglang.multimodal_gen.runtime.pipelines_core.stages.latent_preparation_av i
 )
 from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_denoising import (
     LTX2DenoisingStage,
+)
 from sglang.multimodal_gen.runtime.pipelines_core.stages.ltx_2_two_stage import (
     LTX2LatentUpsampleStage,
     LTX2RefinementLatentPreparationStage,
