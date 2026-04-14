@@ -312,7 +312,6 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
         noise_scale = float(sigma_values[0])
         batch.extra["ltx2_phase"] = "stage2"
         self._reset_stage2_generators(batch)
-
         device = get_local_torch_device()
         dtype = batch.latents.dtype
         video_latents = batch.latents.to(device=device, dtype=dtype)
@@ -327,40 +326,42 @@ class LTX2RefinementLatentPreparationStage(PipelineStage):
             noise_scale,
             generator=batch.generator,
         )
-        if (
-            self.preserve_conditioned_first_frame
-            and self._has_image_conditioning(batch)
-            and batch.image_path is None
+        stage2_condition_latent = None
+        preserved_tokens = 0
+        if self.preserve_conditioned_first_frame and self._has_image_conditioning(
+            batch
         ):
             seq_len = int(packed_video_latents.shape[1])
-            preserved_tokens = int(getattr(batch, "ltx2_num_image_tokens", 0))
-            inferred_tokens_per_frame = None
-            if batch.debug or preserved_tokens <= 0 or preserved_tokens > seq_len:
-                _, inferred_tokens_per_frame = (
-                    server_args.pipeline_config._infer_video_latent_frames_and_tokens_per_frame(
-                        batch, seq_len
-                    )
+            latent_frames, tokens_per_frame = (
+                server_args.pipeline_config._infer_video_latent_frames_and_tokens_per_frame(
+                    batch, seq_len
                 )
-            if preserved_tokens <= 0 or preserved_tokens > seq_len:
-                preserved_tokens = int(inferred_tokens_per_frame)
-            elif (
-                batch.debug
-                and inferred_tokens_per_frame is not None
-                and int(inferred_tokens_per_frame) != preserved_tokens
-            ):
+            )
+            preserve_frames = 1
+            preserve_frames = max(1, min(preserve_frames, int(latent_frames)))
+            preserved_tokens = int(tokens_per_frame) * int(preserve_frames)
+            stage1_condition_tokens = int(getattr(batch, "ltx2_num_image_tokens", 0))
+            if batch.debug and stage1_condition_tokens not in {
+                0,
+                preserved_tokens,
+            }:
                 logger.info(
-                    "LTX-2 stage2 preserving %d image tokens; inferred tokens_per_frame=%d",
+                    "LTX-2 stage2 preserving %d latent frames (%d tokens); stage1 conditioning used %d tokens",
+                    preserve_frames,
                     preserved_tokens,
-                    int(inferred_tokens_per_frame),
+                    stage1_condition_tokens,
                 )
+            stage2_condition_latent = (
+                packed_video_latents[:, :preserved_tokens, :].detach().clone()
+            )
             noised_video_latents[:, :preserved_tokens, :] = packed_video_latents[
                 :, :preserved_tokens, :
             ]
 
         batch.latents = noised_video_latents
         batch.raw_latent_shape = noised_video_latents.shape
-        batch.image_latent = None
-        batch.ltx2_num_image_tokens = 0
+        batch.image_latent = stage2_condition_latent
+        batch.ltx2_num_image_tokens = int(preserved_tokens)
         batch.condition_image = None
 
         if batch.audio_latents is not None:

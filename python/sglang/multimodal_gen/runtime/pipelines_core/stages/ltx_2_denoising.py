@@ -396,18 +396,47 @@ class LTX2DenoisingStage(DenoisingStage):
     def _should_apply_ltx2_ti2v(batch: Req) -> bool:
         """True if we have an image-latent token prefix to condition with.
 
-        SP note: when token latents are time-sharded, only the rank that owns the
-        *global* first latent frame should apply TI2V conditioning (rank with start_frame==0).
+        Under SP, only ranks whose local frame range intersects the global
+        conditioned prefix should apply TI2V masking.
         """
-        if (
-            batch.image_latent is None
-            or int(getattr(batch, "ltx2_num_image_tokens", 0)) <= 0
-        ):
-            return False
+        return LTX2DenoisingStage._get_ltx2_local_num_image_tokens(batch) > 0
+
+    @staticmethod
+    def _get_ltx2_local_num_image_tokens(batch: Req) -> int:
+        if batch.image_latent is None:
+            return 0
+
+        global_tokens = int(getattr(batch, "ltx2_num_image_tokens", 0))
+        if global_tokens <= 0:
+            return 0
+
+        local_seq_len = (
+            int(batch.image_latent.shape[1])
+            if isinstance(batch.image_latent, torch.Tensor)
+            and batch.image_latent.ndim >= 2
+            else global_tokens
+        )
         did_sp_shard = bool(getattr(batch, "did_sp_shard_latents", False))
         if not did_sp_shard:
-            return True
-        return int(getattr(batch, "sp_video_start_frame", 0)) == 0
+            return min(global_tokens, local_seq_len)
+
+        tokens_per_frame = int(getattr(batch, "sp_video_tokens_per_frame", 0))
+        if tokens_per_frame <= 0:
+            return min(global_tokens, local_seq_len)
+
+        valid_token_count = int(
+            getattr(batch, "sp_video_valid_token_count", local_seq_len)
+        )
+        local_valid_frames = max(valid_token_count // tokens_per_frame, 0)
+        start_frame = int(getattr(batch, "sp_video_start_frame", 0))
+        end_frame = start_frame + local_valid_frames
+        global_preserve_frames = math.ceil(global_tokens / tokens_per_frame)
+
+        intersect_frames = max(
+            min(end_frame, global_preserve_frames) - start_frame,
+            0,
+        )
+        return min(intersect_frames * tokens_per_frame, local_seq_len)
 
     @staticmethod
     def _should_replicate_ltx23_audio_for_sp(
@@ -615,8 +644,8 @@ class LTX2DenoisingStage(DenoisingStage):
         # Video and audio keep separate scheduler state throughout the denoising loop.
         ctx.audio_scheduler = copy.deepcopy(self.scheduler)
 
-        # Prepare image latents and embeddings for LTX-2 TI2V generation.
-        self._prepare_ltx2_image_latent(batch, server_args)
+        if phase != "stage2":
+            self._prepare_ltx2_image_latent(batch, server_args)
         do_ti2v = self._should_apply_ltx2_ti2v(batch)
 
         if ctx.use_ltx23_legacy_one_stage:
@@ -669,7 +698,7 @@ class LTX2DenoisingStage(DenoisingStage):
                 self._prepare_ltx2_ti2v_clean_state(
                     latents=ctx.latents,
                     image_latent=batch.image_latent,
-                    num_img_tokens=int(getattr(batch, "ltx2_num_image_tokens", 0)),
+                    num_img_tokens=self._get_ltx2_local_num_image_tokens(batch),
                     zero_clean_latent=ctx.is_ltx23_variant,
                 )
             )
@@ -964,9 +993,18 @@ class LTX2DenoisingStage(DenoisingStage):
                     batch.guidance_scale * (model_audio_text - model_audio_uncond)
                 )
 
+            num_img_tokens = self._get_ltx2_local_num_image_tokens(batch)
+            if num_img_tokens > 0 and ctx.clean_latent is not None:
+                model_video = model_video.clone()
+                model_video[:, :num_img_tokens, :] = 0
+
             ctx.latents = self.scheduler.step(
                 model_video, step.t_device, ctx.latents, return_dict=False
             )[0]
+            if num_img_tokens > 0 and ctx.clean_latent is not None:
+                ctx.latents[:, :num_img_tokens, :] = ctx.clean_latent[
+                    :, :num_img_tokens, :
+                ].to(device=ctx.latents.device, dtype=ctx.latents.dtype)
             ctx.audio_latents = ctx.audio_scheduler.step(
                 model_audio, step.t_device, ctx.audio_latents, return_dict=False
             )[0]
