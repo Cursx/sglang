@@ -52,7 +52,11 @@ def generate_simple_markdown_report(results: List[BenchmarkResult]) -> str:
     )
 
     for result in report_results:
-        itl = 1 / (result.output_throughput / result.batch_size) * 1000 if result.output_throughput > 0 else 0
+        itl = (
+            1 / (result.output_throughput / result.batch_size) * 1000
+            if result.output_throughput > 0
+            else 0
+        )
         summary += f"| {result.batch_size} | {result.input_len} | {result.latency:.2f} | {result.input_throughput:.2f} | {result.output_throughput:.2f} | {itl:.2f} |\n"
 
     return summary
