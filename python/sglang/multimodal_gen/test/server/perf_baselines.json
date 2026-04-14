@@ -2572,7 +2572,8 @@
             },
             "expected_e2e_ms": 41062.04,
             "expected_avg_denoise_ms": 859.35,
-            "expected_median_denoise_ms": 843.02
+            "expected_median_denoise_ms": 843.02,
+            "estimated_full_test_time_s": 175.0
         },
         "ltx_2.3_one_stage_ti2v": {
             "stages_ms": {
